@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
@@ -9,6 +9,8 @@ import Link from "next/link"
 import { VideoGenerationSection } from './video-generation';
 import { WelcomeSection } from './welcome-section';
 import { getChatResponse } from '@/lib/mistralApi';
+import { useSupabaseChat } from '@/hooks/useSupabaseChat';
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 
 interface ChatMessage {
   id: string;
@@ -23,6 +25,29 @@ export function AppPageComponent() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const { chatHistories, createNewChat, loadChatHistories } = useSupabaseChat();
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [isWaitingResponse, setIsWaitingResponse] = useState(false);
+
+  useEffect(() => {
+    loadChatHistories();
+  }, [loadChatHistories]);
+
+  const handleNewChat = async () => {
+    const newChat = await createNewChat();
+    if (newChat) {
+      setSelectedChatId(newChat.id);
+      setChatMessages([]); // Pulisce i messaggi quando si crea una nuova chat
+    }
+  };
+
+  const scrollToBottom = () => {
+    const chatContainer = chatContainerRef.current;
+    if (chatContainer) {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+  };
 
   const handleCopyMessage = (content: string): void => {
     navigator.clipboard.writeText(content)
@@ -65,23 +90,26 @@ export function AppPageComponent() {
     };
     setChatMessages([...chatMessages, newMessage]);
     setMessage(""); 
+    scrollToBottom();
+
+    const aiMessage: ChatMessage = {
+      id: (Date.now() + 1).toString(),
+      content: "",
+      type: 'ai',
+    };
+    setChatMessages(prevMessages => [...prevMessages, aiMessage]);
+    setIsWaitingResponse(true);
 
     try {
-      const aiMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        content: '',
-        type: 'ai',
-      };
-      setChatMessages(prevMessages => [...prevMessages, aiMessage]);
-      setIsTyping(true);
-
       const aiResponse = await getChatResponse(message);
+      setIsWaitingResponse(false);
       
       let currentText = "";
       let index = 0;
 
       const startTypingEffect = () => {
-        setIsTyping(false);
+        setIsTyping(true);
+        console.log("Stato isTyping:", true);
         
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
@@ -90,6 +118,7 @@ export function AppPageComponent() {
         intervalRef.current = setInterval(() => {
           if (index < aiResponse.length) {
             currentText += aiResponse[index];
+            console.log("Testo corrente:", currentText);
             setChatMessages((prevMessages) =>
               prevMessages.map((msg) =>
                 msg.id === aiMessage.id
@@ -101,16 +130,18 @@ export function AppPageComponent() {
           } else {
             if (intervalRef.current) {
               clearInterval(intervalRef.current);
+              setIsTyping(false);
+              console.log("Stato isTyping:", false);
             }
           }
-        }, 50);
+        }, 20);
       };
 
       startTypingEffect();
 
     } catch (error) {
-      setIsTyping(false);
-      console.error('Errore dettagliato nella risposta:', error);
+      setIsWaitingResponse(false);
+      console.error('Errore nella risposta:', error);
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         content: "Mi dispiace, si è verificato un errore nella comunicazione.",
@@ -120,9 +151,33 @@ export function AppPageComponent() {
     }
   };
 
+  const loadChatMessages = async (chatId: string) => {
+    const supabase = createClientComponentClient();
+    const { data: messages, error } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Errore nel caricamento dei messaggi:', error);
+      return;
+    }
+
+    setChatMessages(messages || []);
+  };
+
+  const handleChatSelect = async (chatId: string) => {
+    setSelectedChatId(chatId);
+    await loadChatMessages(chatId);
+  };
+
   const ChatSection = (): JSX.Element => (
-    <div className="flex flex-col h-full">
-      <div className="flex-grow overflow-auto p-4">
+    <div 
+      ref={chatContainerRef}
+      className={`h-[calc(100vh-8rem)] overflow-y-auto ${isTyping ? 'typing' : ''}`}
+    >
+      <div className="p-4 pb-20">
         {chatMessages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'} mb-4 relative`}>
             <div className={`w-3/4 p-3 rounded-lg ${msg.type === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-100'}`}>
@@ -130,7 +185,7 @@ export function AppPageComponent() {
                 {msg.type === 'user' ? <User className="w-5 h-5 mr-2" /> : <MessageSquare className="w-5 h-5 mr-2" />}
                 <span className="font-semibold">{msg.type === 'user' ? 'You' : 'AI'}</span>
               </div>
-              {msg.type === 'ai' && msg.content === '' && isTyping ? (
+              {msg.type === 'ai' && isWaitingResponse && msg.id === chatMessages[chatMessages.length - 1].id ? (
                 <div className="flex items-center space-x-2">
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -200,10 +255,30 @@ export function AppPageComponent() {
   return (
     <div className="flex h-screen bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-gray-100">
       <div className="w-64 bg-gray-800 p-4 flex flex-col border-r border-gray-700">
-        <Link href="/" className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400 mb-8">AI Chat Pro</Link>
-        <Button className="mb-4 bg-gradient-to-r from-purple-500 to-blue-500 text-white">New Chat</Button>
+        <Link href="/" className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400 mb-8">
+          AI Chat Pro
+        </Link>
+        <Button 
+          onClick={handleNewChat}
+          className="mb-4 bg-gradient-to-r from-purple-500 to-blue-500 text-white"
+        >
+          New Chat
+        </Button>
         <div className="flex-grow overflow-auto">
-          {/* Chat history */}
+          {chatHistories.map((chat) => (
+            <div
+              key={chat.id}
+              onClick={() => handleChatSelect(chat.id)}
+              className={`p-2 mb-2 rounded cursor-pointer hover:bg-gray-700 transition-colors ${
+                selectedChatId === chat.id ? 'bg-gray-700' : ''
+              }`}
+            >
+              <div className="flex items-center">
+                <MessageSquare className="w-4 h-4 mr-2" />
+                <span className="truncate">{chat.title}</span>
+              </div>
+            </div>
+          ))}
         </div>
         <Button variant="outline" className="mt-4 border-gray-600 text-gray-800 hover:bg-gray-800 hover:text-gray-100 group">
           <Settings className="mr-2 h-4 w-4 group-hover:text-gray-100" />
@@ -211,10 +286,10 @@ export function AppPageComponent() {
         </Button>
       </div>
 
-      <div className="flex-1 flex flex-col">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-          <div className="flex justify-center border-b border-gray-700">
-            <TabsList className="bg-transparent h-16 items-stretch rounded-lg">
+      <div className="flex-1 flex flex-col relative">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+          <div className="flex justify-center border-b border-gray-700 h-16">
+            <TabsList className="bg-transparent items-stretch rounded-lg">
               <TabsTrigger value="chat" className="px-6 h-full text-gray-300 data-[state=active]:bg-gradient-to-r from-purple-500 to-blue-500 data-[state=active]:text-white rounded-lg">
                 <div className="flex items-center overflow-hidden">
                   <MessageSquare className="mr-2 h-4 w-4" />
@@ -241,7 +316,7 @@ export function AppPageComponent() {
               </TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="chat" className="flex-1 p-4 overflow-auto">
+          <TabsContent value="chat" className="flex-1 relative">
             {chatMessages.length === 0 ? (
               <WelcomeSection
                 title="AI Chat Pro"
@@ -268,6 +343,32 @@ export function AppPageComponent() {
             ) : (
               <ChatSection />
             )}
+            <div className="absolute bottom-0 left-0 right-0 h-16 p-4 border-t border-gray-700 bg-gray-900">
+              <form onSubmit={(e) => { 
+                e.preventDefault(); 
+                handleSendMessage(); 
+              }} className="flex space-x-2">
+                <Input 
+                  value={message} 
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  placeholder="Type your message here..."
+                  className="flex-grow bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500"
+                />
+                <Button 
+                  type="submit" 
+                  className="bg-gradient-to-r from-purple-500 to-blue-500 text-white"
+                >
+                  <Send className="h-4 w-4" />
+                  <span className="sr-only">Send</span>
+                </Button>
+              </form>
+            </div>
           </TabsContent>
           <TabsContent value="image" className="flex-1 p-4 overflow-auto">
             <WelcomeSection
@@ -321,20 +422,6 @@ export function AppPageComponent() {
             <VideoGenerationSection />
           </TabsContent>
         </Tabs>
-        <div className="p-4 border-t border-gray-700">
-          <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="flex space-x-2">
-            <Input 
-              value={message} 
-              onChange={(e) => setMessage(e.target.value)} 
-              placeholder="Type your message here..."
-              className="flex-grow bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500"
-            />
-            <Button type="submit" className="bg-gradient-to-r from-purple-500 to-blue-500 text-white">
-              <Send className="h-4 w-4" />
-              <span className="sr-only">Send</span>
-            </Button>
-          </form>
-        </div>
       </div>
     </div>
   )
