@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 
 export default function Register() {
   const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -32,6 +33,9 @@ export default function Register() {
       password,
       options: {
         emailRedirectTo: `${location.origin}/auth/callback`,
+        data: {
+          username: username
+        }
       },
     })
 
@@ -55,6 +59,14 @@ export default function Register() {
 
         <form onSubmit={handleRegister} className="mt-8 space-y-6">
           <div className="space-y-4">
+            <Input
+              type="text"
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="bg-gray-700 border-gray-600 text-gray-100 placeholder-gray-400"
+              required
+            />
             <Input
               type="email"
               placeholder="Email"

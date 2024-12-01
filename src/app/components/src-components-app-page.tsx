@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
-import { MessageSquare, Image as ImageIcon, Music, Settings, Send, Zap, Sparkles, Palette, SplitSquareVertical, User, Video, MoreVertical, Copy, Share, Flag, Trash2 } from "lucide-react"
+import { MessageSquare, Image as ImageIcon, Music, Settings, Send, Zap, Sparkles, Palette, SplitSquareVertical, User, Video, MoreVertical, Copy, Share, Flag, Trash2, LogOut } from "lucide-react"
 import Link from "next/link"
 import { VideoGenerationSection } from './video-generation';
 import { WelcomeSection } from './welcome-section';
@@ -12,6 +12,8 @@ import { getChatResponse } from '@/lib/mistralApi';
 import { useSupabaseChat } from '@/hooks/useSupabaseChat';
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { Database } from "../../../lib/database.types"
+import { useRouter } from 'next/navigation'
+import { ConfirmDialog } from "./ui/confirm-dialog"
 
 interface ChatMessage {
   id: string;
@@ -31,10 +33,27 @@ export function AppPageComponent() {
   const { chatHistories, createNewChat, loadChatHistories } = useSupabaseChat();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [isWaitingResponse, setIsWaitingResponse] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const router = useRouter();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [chatToDelete, setChatToDelete] = useState<string | null>(null)
 
   useEffect(() => {
     loadChatHistories();
   }, [loadChatHistories]);
+
+  useEffect(() => {
+    const fetchUsername = async () => {
+      const supabase = createClientComponentClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.user_metadata?.username) {
+        setUsername(user.user_metadata.username);
+      }
+    };
+
+    fetchUsername();
+  }, []);
 
   const handleNewChat = async () => {
     const newChat = await createNewChat();
@@ -206,6 +225,82 @@ export function AppPageComponent() {
     await loadChatMessages(chatId);
   };
 
+  const handleLogout = async () => {
+    const supabase = createClientComponentClient();
+    try {
+      await supabase.auth.signOut();
+      // Reset degli stati
+      setUsername(null);
+      setIsDropdownOpen(false);
+      setChatMessages([]);
+      setSelectedChatId(null);
+      // Reindirizza alla landing page
+      router.push('/');
+    } catch (error) {
+      console.error('Errore durante il logout:', error);
+    }
+  };
+
+  const handleDeleteChat = async (chatId: string, event: React.MouseEvent) => {
+    event.stopPropagation()
+    setChatToDelete(chatId)
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!chatToDelete) return;
+    console.log("🚀 Iniziando eliminazione chat:", chatToDelete);
+
+    const supabase = createClientComponentClient();
+    
+    try {
+      // Elimina i messaggi
+      const { error: messagesError } = await supabase
+        .from('chat_messages')
+        .delete()
+        .eq('chat_id', chatToDelete);
+      
+      if (messagesError) {
+        console.error("❌ Errore eliminazione messaggi:", messagesError);
+        return;
+      }
+      console.log("✅ Messaggi eliminati con successo");
+
+      // Elimina la chat
+      const { error: chatError } = await supabase
+        .from('chats')
+        .delete()
+        .eq('id', chatToDelete);
+
+      if (chatError) {
+        console.error("❌ Errore eliminazione chat:", chatError);
+        return;
+      }
+      console.log("✅ Chat eliminata con successo dal database");
+      
+      // Aggiorna l'UI
+      if (selectedChatId === chatToDelete) {
+        setSelectedChatId(null);
+        setChatMessages([]);
+        console.log("✅ Reset chat selezionata e messaggi");
+      }
+
+      // Aggiorna la lista delle chat nella UI
+      const updatedChatHistories = chatHistories.filter(chat => chat.id !== chatToDelete);
+      console.log("🔄 Aggiornamento UI con nuove chat:", updatedChatHistories);
+      
+      // Usa la funzione del custom hook per aggiornare le chat
+      await loadChatHistories();
+      
+    } catch (error) {
+      console.error("❌ Errore generale durante l'eliminazione:", error);
+    } finally {
+      setDeleteDialogOpen(false);
+      setChatToDelete(null);
+      console.log("✅ Operazione completata");
+    }
+  };
+
   const ChatSection = (): JSX.Element => (
     <div 
       ref={chatContainerRef}
@@ -307,9 +402,18 @@ export function AppPageComponent() {
                 selectedChatId === chat.id ? 'bg-gray-700' : ''
               }`}
             >
-              <div className="flex items-center">
-                <MessageSquare className="w-4 h-4 mr-2" />
-                <span className="truncate">{chat.title}</span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center flex-grow overflow-hidden">
+                  <MessageSquare className="w-4 h-4 mr-2 flex-shrink-0" />
+                  <span className="truncate">{chat.title}</span>
+                </div>
+                <button
+                  onClick={(e) => handleDeleteChat(chat.id, e)}
+                  className="p-1 hover:bg-gray-600 rounded-full transition-colors ml-2"
+                  title="Elimina chat"
+                >
+                  <Trash2 className="w-4 h-4 text-gray-400 hover:text-red-400" />
+                </button>
               </div>
             </div>
           ))}
@@ -322,7 +426,7 @@ export function AppPageComponent() {
 
       <div className="flex-1 flex flex-col relative">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-          <div className="flex justify-center border-b border-gray-700 h-16">
+          <div className="flex justify-between items-center border-b border-gray-700 h-16 px-4">
             <TabsList className="bg-transparent items-stretch rounded-lg">
               <TabsTrigger value="chat" className="px-6 h-full text-gray-300 data-[state=active]:bg-gradient-to-r from-purple-500 to-blue-500 data-[state=active]:text-white rounded-lg">
                 <div className="flex items-center overflow-hidden">
@@ -349,6 +453,32 @@ export function AppPageComponent() {
                 </div>
               </TabsTrigger>
             </TabsList>
+
+            <div className="relative">
+              <Button
+                variant="ghost"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="flex items-center gap-2 text-gray-300 hover:bg-gray-700"
+              >
+                <User className="w-5 h-5" />
+                <span>{username || 'Utente'}</span>
+              </Button>
+
+              {isDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5">
+                  <div className="py-1" role="menu">
+                    <button
+                      onClick={handleLogout}
+                      className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+                      role="menuitem"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Logout
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <TabsContent value="chat" className="flex-1 relative">
             {chatMessages.length === 0 ? (
@@ -457,6 +587,17 @@ export function AppPageComponent() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmDialog
+        isOpen={deleteDialogOpen}
+        title="Elimina Chat"
+        message="Sei sicuro di voler eliminare questa chat? Questa azione non può essere annullata."
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          setDeleteDialogOpen(false)
+          setChatToDelete(null)
+        }}
+      />
     </div>
   )
 }
