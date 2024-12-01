@@ -11,11 +11,13 @@ import { WelcomeSection } from './welcome-section';
 import { getChatResponse } from '@/lib/mistralApi';
 import { useSupabaseChat } from '@/hooks/useSupabaseChat';
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { Database } from "../../../lib/database.types"
 
 interface ChatMessage {
   id: string;
   content: string;
   type: 'user' | 'ai';
+  chat_id: string;
 }
 
 export function AppPageComponent() {
@@ -81,13 +83,43 @@ export function AppPageComponent() {
   }
 
   const handleSendMessage = async (): Promise<void> => {
-    if (!message.trim()) return; 
+    if (!message.trim()) return;
+
+    const supabase = createClientComponentClient<Database>();
     
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      console.error('Utente non autenticato');
+      return;
+    }
+
+    if (!selectedChatId) {
+      const newChat = await createNewChat();
+      if (newChat) {
+        setSelectedChatId(newChat.id);
+      }
+    }
+
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
       content: message,
       type: 'user',
+      chat_id: selectedChatId || ''
     };
+
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .insert([{
+        content: message,
+        type: 'user',
+        chat_id: selectedChatId
+      }])
+      .select();
+
+      console.log("🚀 supabase request",supabase);
+      console.log("🚀 supabase data", data);
+      console.error("🚀 supabase error", error);
+
     setChatMessages([...chatMessages, newMessage]);
     setMessage(""); 
     scrollToBottom();
@@ -96,6 +128,7 @@ export function AppPageComponent() {
       id: (Date.now() + 1).toString(),
       content: "",
       type: 'ai',
+      chat_id: selectedChatId || ''
     };
     setChatMessages(prevMessages => [...prevMessages, aiMessage]);
     setIsWaitingResponse(true);
@@ -118,7 +151,6 @@ export function AppPageComponent() {
         intervalRef.current = setInterval(() => {
           if (index < aiResponse.length) {
             currentText += aiResponse[index];
-            console.log("Testo corrente:", currentText);
             setChatMessages((prevMessages) =>
               prevMessages.map((msg) =>
                 msg.id === aiMessage.id
@@ -146,6 +178,7 @@ export function AppPageComponent() {
         id: (Date.now() + 1).toString(),
         content: "Mi dispiace, si è verificato un errore nella comunicazione.",
         type: 'ai',
+        chat_id: selectedChatId || ''
       };
       setChatMessages(prevMessages => [...prevMessages, errorMessage]);
     }
@@ -153,6 +186,7 @@ export function AppPageComponent() {
 
   const loadChatMessages = async (chatId: string) => {
     const supabase = createClientComponentClient();
+    
     const { data: messages, error } = await supabase
       .from('chat_messages')
       .select('*')
@@ -253,7 +287,7 @@ export function AppPageComponent() {
   };
 
   return (
-    <div className="flex h-screen bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-gray-100">
+    <div className="flex h-screen overflow-x-hidden bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-gray-100">
       <div className="w-64 bg-gray-800 p-4 flex flex-col border-r border-gray-700">
         <Link href="/" className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400 mb-8">
           AI Chat Pro

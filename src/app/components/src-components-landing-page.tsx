@@ -4,7 +4,7 @@ import { useState } from "react"
 import { motion } from "framer-motion"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
-import { MessageSquare, Image as ImageIcon, Music, ArrowRight, Sparkles, Github, Twitter, Linkedin, Facebook } from "lucide-react"
+import { MessageSquare, Image as ImageIcon, Music, ArrowRight, Sparkles, Github, Twitter, Linkedin, Facebook, User } from "lucide-react"
 import Link from "next/link"
 import { Variants } from 'framer-motion';
 import { useRouter } from 'next/navigation'
@@ -61,16 +61,28 @@ export function LandingPageComponent() {
               AI Chat Pro
             </motion.div>
             <motion.div
+              className="flex items-center gap-4"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.5 }}
             >
               <Button 
                 variant="outline" 
-                className="border-gray-700 text-gray-800 hover:bg-gray-800 hover:text-gray-100"
+                className="border-gray-700 text-gray-700 hover:bg-gray-800 hover:text-gray-100"
                 onClick={() => router.push('/app-page')}
               >
                 Go to App
+              </Button>
+              <Button
+                variant="ghost"
+                className="text-gray-100 hover:bg-gray-800 hover:text-gray-100 flex items-center gap-2"
+                onClick={() => router.push('/authentication')}
+              >
+                <span className="text-sm">Login</span>
+                <div className="w-8 h-8 rounded-full border border-gray-100 flex items-center justify-center">
+                  <User className="h-4 w-4" />
+                </div>
+                <span className="sr-only">Login</span>
               </Button>
             </motion.div>
           </nav>
