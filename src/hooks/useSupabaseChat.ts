@@ -46,9 +46,41 @@ export function useSupabaseChat() {
     setChatHistories(data);
   };
 
+  const deleteChat = async (chatId: string) => {
+    try {
+      const { error: messagesError } = await supabase
+        .from('chat_messages')
+        .delete()
+        .eq('chat_id', chatId);
+      
+      if (messagesError) {
+        console.error("❌ Errore eliminazione messaggi:", messagesError);
+        return false;
+      }
+
+      const { error: chatError } = await supabase
+        .from('chat_histories')
+        .delete()
+        .eq('id', chatId);
+
+      if (chatError) {
+        console.error("❌ Errore eliminazione chat:", chatError);
+        return false;
+      }
+
+      setChatHistories(prev => prev.filter(chat => chat.id !== chatId));
+      return true;
+    } catch (error) {
+      console.error("❌ Errore durante l'eliminazione:", error);
+      return false;
+    }
+  };
+
   return {
     chatHistories,
+    setChatHistories,
     createNewChat,
     loadChatHistories,
+    deleteChat
   };
 } 

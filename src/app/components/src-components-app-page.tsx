@@ -30,7 +30,12 @@ export function AppPageComponent() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const { chatHistories, createNewChat, loadChatHistories } = useSupabaseChat();
+  const { 
+    chatHistories, 
+    createNewChat, 
+    loadChatHistories,
+    deleteChat
+  } = useSupabaseChat();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [isWaitingResponse, setIsWaitingResponse] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
@@ -54,6 +59,12 @@ export function AppPageComponent() {
 
     fetchUsername();
   }, []);
+
+  useEffect(() => {
+    console.log("🔄 chatHistories aggiornato:", 
+      chatHistories.map(ch => ({ id: ch.id, title: ch.title }))
+    );
+  }, [chatHistories]);
 
   const handleNewChat = async () => {
     const newChat = await createNewChat();
@@ -249,55 +260,38 @@ export function AppPageComponent() {
 
   const confirmDelete = async () => {
     if (!chatToDelete) return;
-    console.log("🚀 Iniziando eliminazione chat:", chatToDelete);
-
-    const supabase = createClientComponentClient();
     
+    console.log("🚀 Avvio eliminazione chat:", {
+      chatToDelete,
+      totalChats: chatHistories.length,
+      chats: chatHistories.map(ch => ({ id: ch.id, title: ch.title }))
+    });
+
     try {
-      // Elimina i messaggi
-      const { error: messagesError } = await supabase
-        .from('chat_messages')
-        .delete()
-        .eq('chat_id', chatToDelete);
+      const success = await deleteChat(chatToDelete);
       
-      if (messagesError) {
-        console.error("❌ Errore eliminazione messaggi:", messagesError);
-        return;
+      if (success) {
+        console.log("✅ Eliminazione completata con successo");
+        
+        if (selectedChatId === chatToDelete) {
+          setSelectedChatId(null);
+          setChatMessages([]);
+          console.log("🔄 Reset chat selezionata");
+        }
+        
+        // Verifica immediata dello stato
+        console.log("📊 Stato chatHistories dopo eliminazione:", {
+          totalChats: chatHistories.length,
+          chats: chatHistories.map(ch => ({ id: ch.id, title: ch.title }))
+        });
+      } else {
+        console.error("❌ Eliminazione fallita");
       }
-      console.log("✅ Messaggi eliminati con successo");
-
-      // Elimina la chat
-      const { error: chatError } = await supabase
-        .from('chats')
-        .delete()
-        .eq('id', chatToDelete);
-
-      if (chatError) {
-        console.error("❌ Errore eliminazione chat:", chatError);
-        return;
-      }
-      console.log("✅ Chat eliminata con successo dal database");
-      
-      // Aggiorna l'UI
-      if (selectedChatId === chatToDelete) {
-        setSelectedChatId(null);
-        setChatMessages([]);
-        console.log("✅ Reset chat selezionata e messaggi");
-      }
-
-      // Aggiorna la lista delle chat nella UI
-      const updatedChatHistories = chatHistories.filter(chat => chat.id !== chatToDelete);
-      console.log("🔄 Aggiornamento UI con nuove chat:", updatedChatHistories);
-      
-      // Usa la funzione del custom hook per aggiornare le chat
-      await loadChatHistories();
-      
     } catch (error) {
-      console.error("❌ Errore generale durante l'eliminazione:", error);
+      console.error("❌ Errore durante l'eliminazione:", error);
     } finally {
       setDeleteDialogOpen(false);
       setChatToDelete(null);
-      console.log("✅ Operazione completata");
     }
   };
 
